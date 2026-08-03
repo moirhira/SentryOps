@@ -26,7 +26,7 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
         "version" : version
     }
 
-    response = requests.post(endpoint, json=body)
+    response = requests.post(endpoint, json=body, timeout=10)
 
     if (response.status_code != 200):
         print("Error")
