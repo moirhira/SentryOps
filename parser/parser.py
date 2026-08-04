@@ -33,8 +33,21 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
 
     python_dict = response.json()
 
-    print(python_dict)
+    seen = set()
+    unique_vulns = []
 
+
+    for vuln in python_dict["vulns"]:
+        ids = {vuln["id"], *vuln.get("aliases", [])}
+
+        if ids & seen:
+            continue
+
+        unique_vulns.append(vuln)
+        seen.update(ids)
+
+    for vuln in unique_vulns:
+        print(vuln["id"])
     return python_dict.get("vulns", [])
 
     
@@ -46,6 +59,6 @@ if __name__ == "__main__":
         "PyPI"
     )
 
-    print(result)
+    # print(result)
 
 
