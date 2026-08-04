@@ -25,8 +25,14 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
         "version" : version
     }
 
+    
+    
     try:
         response = requests.post(endpoint, json=body, timeout=10)
+        if response.status_code != 200:
+                print(f"Request failed with status code: {response.status_code}")
+                return []
+        
     except requests.exceptions.RequestException as e:
         print(f"Request failed: {e}")
         return []
@@ -48,7 +54,9 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
 
     for vuln in unique_vulns:
         print(vuln["id"])
-    return python_dict.get("vulns", [])
+        print(vuln.get("summary", "No summary available"))
+        print(vuln.get("database_specific", {}).get("severity", "No severity available"))
+    return unique_vulns
 
     
 
