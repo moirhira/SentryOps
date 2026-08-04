@@ -29,12 +29,10 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     
     try:
         response = requests.post(endpoint, json=body, timeout=10)
-        if response.status_code != 200:
-                print(f"Request failed with status code: {response.status_code}")
-                return []
+        response.raise_for_status()
         
     except requests.exceptions.RequestException as e:
-        print(f"Request failed: {e}")
+        print(e)
         return []
 
     python_dict = response.json()
@@ -64,6 +62,8 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     return normalized
 
     
+
+
 
 if __name__ == "__main__":
     result = check_package(
