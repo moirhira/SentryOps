@@ -15,7 +15,7 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     if not version:
         return []
 
-    endpoint = "https://api.osv.dev/v1/query"
+    OSV_ENDPOINT = "https://api.osv.dev/v1/query"
 
     body = {
         "package" : {
@@ -28,7 +28,7 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     
     
     try:
-        response = requests.post(endpoint, json=body, timeout=10)
+        response = requests.post(OSV_ENDPOINT, json=body, timeout=10)
         response.raise_for_status()
         
     except requests.exceptions.RequestException as e:
@@ -64,15 +64,30 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     
 
 
+def parse_requirements(requirements_file: str) -> list[tuple[str, str]]:
+    packages = []
+
+    with open(requirements_file, "r") as file:
+        for line in file:
+            line = line.strip()
+
+            if not line or line.startswith("#"):
+                continue
+
+            package, version = line.split("==", 1)
+            packages.append((package, version))
+
+    return packages
 
 if __name__ == "__main__":
-    result = check_package(
-        "requests",
-        "2.28.1",
-        "PyPI"
-    )
+    # result = check_package(
+    #     "requests",
+    #     "2.28.1",
+    #     "PyPI"
+    # )
 
-    for vuln in result:
-        print(vuln)
+    # for vuln in result:
+    #     print(vuln)
+    parse_requirements("requirements.txt")
 
 
