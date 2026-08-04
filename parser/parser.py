@@ -1,4 +1,6 @@
 import requests
+from requests.packages import package
+from typing import Optional
 
 
 
@@ -64,18 +66,33 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     
 
 
-def parse_requirements(requirements_file: str) -> list[tuple[str, str]]:
+def parse_requirements(requirements_file: str) -> list[tuple[str, Optional[str]]]:
     packages = []
+    unsupported_operators = {">", "<", ">=", "<=", "~=", "!=", "==="}
 
     with open(requirements_file, "r") as file:
         for line in file:
-            line = line.strip()
+            line = line.strip() 
 
             if not line or line.startswith("#"):
                 continue
 
-            package, version = line.split("==", 1)
-            packages.append((package, version))
+            if line.startswith(("git+", "-r", "--", "-e")):
+                print(f"Warning: Unsupported line in requirements file: {line}. This package will be ignored.")
+                continue
+
+
+            if "==" in line:
+                package, version = line.split("==", 1)
+                packages.append((package, version))
+                continue
+
+            if any(op in line for op in unsupported_operators):
+                print(f"Warning: Unsupported operator found in line: {line}. This package will be ignored.")
+                continue
+            
+            
+            packages.append((line, None))
 
     return packages
 
