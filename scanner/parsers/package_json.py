@@ -1,5 +1,6 @@
-from zipfile import Path
-
+from pathlib import Path
+import json
+from typing import List, Dict
 
 def parse_package_json(path: Path) -> List[Dict]:
     """
@@ -18,8 +19,8 @@ def parse_package_json(path: Path) -> List[Dict]:
 
     try:
         data = json.loads(path.read_text())
-    except json.JSONDecodeError:
-        return packages
+    except (OSError, json.JSONDecodeError):
+        return []
 
     for section in ("dependencies", "devDependencies"):
         for name, version in data.get(section, {}).items():
