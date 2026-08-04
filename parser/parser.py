@@ -66,7 +66,7 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     
 
 
-def parse_requirements(requirements_file: str) -> list[tuple[str, Optional[str]]]:
+def parse_requirements(requirements_file: str) -> list[tuple[str, Optional[str], str]]:
     packages = []
     unsupported_operators = {">", "<", ">=", "<=", "~=", "!=", "==="}
 
@@ -84,7 +84,7 @@ def parse_requirements(requirements_file: str) -> list[tuple[str, Optional[str]]
 
             if "==" in line:
                 package, version = line.split("==", 1)
-                packages.append((package, version))
+                packages.append((package, version, "PyPI"))
                 continue
 
             if any(op in line for op in unsupported_operators):
@@ -92,7 +92,7 @@ def parse_requirements(requirements_file: str) -> list[tuple[str, Optional[str]]
                 continue
             
             
-            packages.append((line, None))
+            packages.append((line, None, "PyPI"))
 
     return packages
 
