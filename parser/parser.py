@@ -63,10 +63,17 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
 
     return normalized
 
+
+from dataclasses import dataclass
+
+@dataclass
+class Dependency:
+    name: str
+    version: str | None
+    ecosystem: str
     
 
-
-def parse_requirements(requirements_file: str) -> list[tuple[str, Optional[str], str]]:
+def parse_requirements(requirements_file: str) -> list[Dependency]:
     packages = []
     unsupported_operators = {">", "<", ">=", "<=", "~=", "!=", "==="}
 
@@ -84,7 +91,7 @@ def parse_requirements(requirements_file: str) -> list[tuple[str, Optional[str],
 
             if "==" in line:
                 package, version = line.split("==", 1)
-                packages.append((package, version, "PyPI"))
+                packages.append(Dependency(name=package, version=version, ecosystem="PyPI"))
                 continue
 
             if any(op in line for op in unsupported_operators):
@@ -92,7 +99,7 @@ def parse_requirements(requirements_file: str) -> list[tuple[str, Optional[str],
                 continue
             
             
-            packages.append((line, None, "PyPI"))
+            packages.append(Dependency(name=line, version=None, ecosystem="PyPI"))
 
     return packages
 
@@ -105,6 +112,14 @@ if __name__ == "__main__":
 
     # for vuln in result:
     #     print(vuln)
-    parse_requirements("requirements.txt")
+    # parse_requirements("requirements.txt")
+    packages = parse_requirements("requirements.txt")
+
+    for package in packages:
+        vulns = check_package(
+            package.name,
+            package.version,
+            package.ecosystem,
+        )
 
 
