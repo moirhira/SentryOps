@@ -1,6 +1,4 @@
-
-
-from osv.client import check_package
+from scanner.osv.client import check_package
 from scanner.parsers.requirements import parse_requirements
 
 
