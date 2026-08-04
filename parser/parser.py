@@ -43,7 +43,8 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     unique_vulns = []
 
 
-    for vuln in python_dict["vulns"]:
+
+    for vuln in python_dict.get("vulns", []):
         ids = {vuln["id"], *vuln.get("aliases", [])}
 
         if ids & seen:
@@ -52,11 +53,15 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
         unique_vulns.append(vuln)
         seen.update(ids)
 
+    normalized = []
     for vuln in unique_vulns:
-        print(vuln["id"])
-        print(vuln.get("summary", "No summary available"))
-        print(vuln.get("database_specific", {}).get("severity", "No severity available"))
-    return unique_vulns
+        normalized.append({
+            "id": vuln["id"],
+            "summary": vuln.get("summary", "No summary available"),
+            "severity": vuln.get("database_specific", {}).get("severity", "No severity available")
+        })
+
+    return normalized
 
     
 
@@ -67,6 +72,7 @@ if __name__ == "__main__":
         "PyPI"
     )
 
-    # print(result)
+    for vuln in result:
+        print(vuln)
 
 
