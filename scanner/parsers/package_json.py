@@ -1,8 +1,8 @@
 from pathlib import Path
 import json
-from typing import List, Dict
+from .models import Dependency
 
-def parse_package_json(path: Path) -> List[Dict]:
+def parse_package_json(path: Path) -> List[Dependency]:
     """
     Parse a package.json file and return a list of dependencies.
 
@@ -10,7 +10,7 @@ def parse_package_json(path: Path) -> List[Dict]:
         path (Path): The path to the package.json file.
 
     Returns:
-        List[Dict]: A list of dictionaries representing the dependencies.
+        List[Dependency]: A list of Dependency objects representing the dependencies.
     """
     packages = []
 
@@ -24,10 +24,10 @@ def parse_package_json(path: Path) -> List[Dict]:
 
     for section in ("dependencies", "devDependencies"):
         for name, version in data.get(section, {}).items():
-            packages.append({
-                "name": name,
-                "version": version,
-                "ecosystem": "npm"
-            })
+            packages.append(Dependency(
+                name=name,
+                version=version,
+                ecosystem="npm"
+            ))
 
     return packages
