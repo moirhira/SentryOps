@@ -6,13 +6,21 @@ as Dependency objects, ready to feed into the vulnerability engine.
 
 import subprocess
 import platform
+import sys
+from pathlib import Path
 from dataclasses import dataclass
-from .models import Dependency
+
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+    from scanner.parsers.models import Dependency
+else:
+    from .models import Dependency
+
 
 
 @dataclass(slots=True)
 class HostInfo:
-    od_id: str | None
+    os_id: str | None
     os_name: str | None
     version: str | None
     architecture: str | None
@@ -62,10 +70,10 @@ def get_installed_packages_dpkg() -> list[Dependency]:
 
     dependencies = []
 
-    for line in result.stdout.strip().split():
+    for line in result.stdout.strip().splitlines():
         if not line:
             continue
-        name, version = line.split("\t")
+        name, version = line.split(" ", 1)
         dependencies.append(
             Dependency(name=name, version=version, ecosystem="dpkg")
         )
@@ -107,12 +115,26 @@ def scan_host() -> list[Dependency]:
     os_id = os_info.get("ID", "").lower()
     id_like = os_info.get("ID_LIKE", "").lower().split()
 
-    if os_id in _DPKG_FAMILY or id_like & _DPKG_FAMILY:
+    if os_id in _DPKG_FAMILY or bool(set(id_like) & _DPKG_FAMILY):
         return get_installed_packages_dpkg()
-    if os_id in _RPM_FAMILY or id_like & _RPM_FAMILY:
+    if os_id in _RPM_FAMILY or bool(set(id_like) & _RPM_FAMILY):
         return get_installed_packages_rpm()
     else:
         raise RuntimeError(
             f"Unsupported distro: ID={os_id!r}, ID_LIKE={os_info.get('ID_LIKE', '')!r}. "
             f"Currently supported: dpkg-based and rpm-based distros."
         )
+
+
+if __name__ == "__main__":
+    host = get_host_info()
+    print(f"Host: {host.os_name} ({host.architecture})")
+    print(f"Distro ID: {host.os_id}, Version: {host.version}")
+    print("-" * 40)
+
+    packages = scan_host()
+    print(f"Found {len(packages)} installed packages\n")
+    for pkg in packages[:10]:
+        print(f"  {pkg.name:<30} {pkg.version}")
+    if len(packages) > 10:
+        print(f"  ... and {len(packages) - 10} more")
