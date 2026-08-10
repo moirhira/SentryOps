@@ -49,3 +49,45 @@ def get_host_info() -> HostInfo:
         version = os_info.get("VERSION_ID", "unknown"),
         architecture = platform.machine(),
     )
+
+
+def get_installed_packages() -> list[Dependency]:
+    """Scan installed packages via dpkg-query (Debian/Ubuntu family)."""
+    result = subprocess.run(
+        ["dpkg-query", "-W", "-f=${Package} ${Version}\n"],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+
+    dependencies = []
+
+    for line in result.stdout.strip().split():
+        if not line:
+            continue
+        name, version = line.split("\t")
+        dependencies.append(
+            Dependency(name=name, version=version, ecosystem="dpkg")
+        )
+    return dependencies
+
+def get_rpm_installed_packages() -> list[Dependency]:
+    """Scan installed packages v rpm (RHEL/Fedora/CentOS/Rocky/Alma family)."""
+    result =subprocess.run(
+        ["rpm", "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n"],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+
+    dependencies = []
+
+    for line in result.stdout.strip().split("\n"):
+        if not line:
+            continue
+        name, version = line.split("\t")
+        dependencies.append(
+            Dependency(name=name, version=version, ecosystem="rpm")
+        )
+    return dependencies
+
