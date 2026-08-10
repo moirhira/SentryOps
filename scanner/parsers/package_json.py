@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 from .models import Dependency
 
-def parse_package_json(path: Path) -> List[Dependency]:
+def parse_package_json(path: Path) -> list[Dependency]:
     """
     Parse a package.json file and return a list of dependencies.
 

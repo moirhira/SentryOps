@@ -1,3 +1,9 @@
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 from scanner.osv.client import check_package
 from scanner.parsers.requirements import parse_requirements
 
@@ -12,7 +18,7 @@ if __name__ == "__main__":
     # for vuln in result:
     #     print(vuln)
     # parse_requirements("requirements.txt")
-    packages = parse_requirements("requirements.txt")
+    packages = parse_requirements(Path("requirements.txt"))
 
     for package in packages:
         vulns = check_package(

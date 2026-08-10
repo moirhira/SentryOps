@@ -1,7 +1,7 @@
 from pathlib import Path
 from .models import Dependency
 
-def parse_dockerfile(path: Path) -> List[Dependency]:
+def parse_dockerfile(path: Path) -> list[Dependency]:
     """
     Parse a Dockerfile and return a list of dependencies.
 
