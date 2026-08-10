@@ -36,3 +36,16 @@ def get_os_info() -> dict[str, str]:
     except FileNotFoundError:
         raise RuntimeError("Could not find /etc/os-release. Are you running Linux?")
     return info
+
+
+def get_host_info() -> HostInfo:
+    """Build a HostInfo summary from os-release + platform data."""
+
+    os_info = get_os_info()
+
+    return HostInfo(
+        os_id = os_info.get("ID", "unknown").lower(),
+        os_name = os_info.get("NAME", "unknown"),
+        version = os_info.get("VERSION_ID", "unknown"),
+        architecture = platform.machine(),
+    )
