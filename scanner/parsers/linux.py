@@ -51,7 +51,7 @@ def get_host_info() -> HostInfo:
     )
 
 
-def get_installed_packages() -> list[Dependency]:
+def get_installed_packages_dpkg() -> list[Dependency]:
     """Scan installed packages via dpkg-query (Debian/Ubuntu family)."""
     result = subprocess.run(
         ["dpkg-query", "-W", "-f=${Package} ${Version}\n"],
@@ -71,8 +71,8 @@ def get_installed_packages() -> list[Dependency]:
         )
     return dependencies
 
-def get_rpm_installed_packages() -> list[Dependency]:
-    """Scan installed packages v rpm (RHEL/Fedora/CentOS/Rocky/Alma family)."""
+def get_installed_packages_rpm() -> list[Dependency]:
+    """Scan installed packages via rpm (RHEL/Fedora/CentOS/Rocky/Alma family)."""
     result =subprocess.run(
         ["rpm", "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n"],
         capture_output=True,
@@ -91,3 +91,28 @@ def get_rpm_installed_packages() -> list[Dependency]:
         )
     return dependencies
 
+
+_DPKG_FAMILY = {"debian", "ubuntu", "linuxmint", "pop", "raspbian", "kali"}
+_RPM_FAMILY = {"rhel", "fedora", "centos", "rocky", "almalinux", "amzn"}
+
+
+
+def scan_host() -> list[Dependency]:
+    """
+    Detect the host distro via /etc/os-release (not binary presence on PATH)
+    and return installed packages as Dependency objects.
+    """
+
+    os_info = get_os_info()
+    os_id = os_info.get("ID", "").lower()
+    id_like = os_info.get("ID_LIKE", "").lower().split()
+
+    if os_id in _DPKG_FAMILY or id_like & _DPKG_FAMILY:
+        return get_installed_packages_dpkg()
+    if os_id in _RPM_FAMILY or id_like & _RPM_FAMILY:
+        return get_installed_packages_rpm()
+    else:
+        raise RuntimeError(
+            f"Unsupported distro: ID={os_id!r}, ID_LIKE={os_info.get('ID_LIKE', '')!r}. "
+            f"Currently supported: dpkg-based and rpm-based distros."
+        )
