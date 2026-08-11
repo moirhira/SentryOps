@@ -20,6 +20,7 @@ def get_installed_packages_rpm() -> list[Dependency]:
         if len(parts) == 2:
             name, version = parts
             dependencies.append(
-                Dependency(name=name, version=version, ecosystem="rpm")
+                Dependency(name=name, version=version, ecosystem="rpm", source="rpm", location="host")
             )
     return dependencies
+
