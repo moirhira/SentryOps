@@ -8,27 +8,101 @@ from datetime import datetime
 from typing import Any
 
 
+import math
+
+
+def calculate_cvss_score(severity_str: str) -> float | None:
+    """Parse CVSS v3.x vector from severity string and compute base score."""
+    if not severity_str or not isinstance(severity_str, str):
+        return None
+
+    if "AV:" in severity_str:
+        parts = severity_str.split()
+        vector_part = None
+        for p in parts:
+            if "AV:" in p:
+                vector_part = p
+                break
+
+        if not vector_part:
+            vector_part = severity_str
+
+        metrics = {}
+        for item in vector_part.split("/"):
+            if ":" in item:
+                k, v = item.split(":", 1)
+                metrics[k.upper()] = v.upper()
+
+        av_map = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
+        ac_map = {"L": 0.77, "H": 0.44}
+        ui_map = {"N": 0.85, "R": 0.62}
+        c_map = {"H": 0.56, "L": 0.22, "N": 0.0}
+        i_map = {"H": 0.56, "L": 0.22, "N": 0.0}
+        a_map = {"H": 0.56, "L": 0.22, "N": 0.0}
+
+        s = metrics.get("S", "U")
+        pr = metrics.get("PR", "N")
+
+        if s == "U":
+            pr_map = {"N": 0.85, "L": 0.62, "H": 0.27}
+        else:
+            pr_map = {"N": 0.85, "L": 0.68, "H": 0.50}
+
+        av = av_map.get(metrics.get("AV", "N"), 0.85)
+        ac = ac_map.get(metrics.get("AC", "L"), 0.77)
+        pr_val = pr_map.get(pr, 0.85)
+        ui = ui_map.get(metrics.get("UI", "N"), 0.85)
+
+        c = c_map.get(metrics.get("C", "N"), 0.0)
+        i = i_map.get(metrics.get("I", "N"), 0.0)
+        a = a_map.get(metrics.get("A", "N"), 0.0)
+
+        iss = 1.0 - ((1.0 - c) * (1.0 - i) * (1.0 - a))
+
+        if s == "U":
+            impact = 6.42 * iss
+        else:
+            impact = 7.52 * (iss - 0.029) - 3.25 * math.pow(iss - 0.02, 15)
+
+        if impact <= 0:
+            return 0.0
+
+        exploitability = 8.22 * av * ac * pr_val * ui
+
+        if s == "U":
+            score = min(impact + exploitability, 10.0)
+        else:
+            score = min(1.08 * (impact + exploitability), 10.0)
+
+        return math.ceil(score * 10.0) / 10.0
+
+    return None
+
+
 def classify_severity(vuln: dict[str, Any]) -> str:
     """Classify vulnerability severity into CRITICAL, HIGH, MEDIUM, LOW."""
-    sev_str = str(vuln.get("severity", "")).upper()
-    level = vuln.get("severity_level")
-    if level and level in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
-        return level
+    sev_str = str(vuln.get("severity", ""))
+    
+    cvss_score = calculate_cvss_score(sev_str)
+    if cvss_score is not None:
+        if cvss_score >= 9.0:
+            return "CRITICAL"
+        elif cvss_score >= 7.0:
+            return "HIGH"
+        elif cvss_score >= 4.0:
+            return "MEDIUM"
+        else:
+            return "LOW"
 
-    if "CRITICAL" in sev_str:
+    sev_upper = sev_str.upper()
+    if "CRITICAL" in sev_upper:
         return "CRITICAL"
-    if "HIGH" in sev_str:
+    if "HIGH" in sev_upper:
         return "HIGH"
-    if "MEDIUM" in sev_str or "MODERATE" in sev_str:
+    if "MEDIUM" in sev_upper or "MODERATE" in sev_upper:
         return "MEDIUM"
-    if "LOW" in sev_str:
+    if "LOW" in sev_upper or "UNIMPORTANT" in sev_upper or "END-OF-LIFE" in sev_upper:
         return "LOW"
-
-    # Secondary heuristic based on CVSS metrics if present
-    if "C:H/I:H/A:H" in sev_str or "C:H/I:H" in sev_str:
-        return "HIGH"
-    if "C:H" in sev_str or "I:H" in sev_str or "A:H" in sev_str:
-        return "MEDIUM"
 
     return "MEDIUM"
 
@@ -128,7 +202,8 @@ def render_human_readable(
 
     lines.append("───────────────────────────")
     duration = scan_meta.get("duration", 0.0)
-    lines.append(f"Scan completed in {duration:.1f}s")
+    cache_tag = " (cached)" if scan_meta.get("is_cached") else ""
+    lines.append(f"Scan completed in {duration:.1f}s{cache_tag}")
 
     return "\n".join(lines)
 
