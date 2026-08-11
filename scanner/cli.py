@@ -97,6 +97,7 @@ def run_scan(
         "id": f"scan-{datetime.now().strftime('%Y%m%d')}-001",
         "started_at": started_at_iso,
         "duration": duration,
+        "is_cached": duration < 1.0,
         "target_name": target_name,
         "target_type": target_type,
         "target_type_short": target_type_short,
