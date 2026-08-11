@@ -62,7 +62,7 @@ def _save_cache(cache: dict) -> None:
 
 def parse_vuln_details(v: dict) -> dict:
     """
-    Extract summary/details and severity/urgency from OSV vulnerability dictionary.
+    Extract summary/details, severity/urgency, and fixed versions from OSV vulnerability dictionary.
     Handles Debian OSV schema specifics (details instead of summary, CVSS severity arrays, ecosystem_specific urgency).
     """
     summary = v.get("summary") or v.get("details") or "No summary available"
@@ -92,10 +92,43 @@ def parse_vuln_details(v: dict) -> dict:
     if not severity_str:
         severity_str = "No severity available"
 
+    # Extract fixed version if present in affected ranges
+    fixed_version = None
+    if v.get("affected"):
+        for aff in v.get("affected", []):
+            for r in aff.get("ranges", []):
+                for event in r.get("events", []):
+                    if isinstance(event, dict) and "fixed" in event:
+                        fixed_version = event["fixed"]
+                        break
+                if fixed_version:
+                    break
+            if fixed_version:
+                break
+
+    # Determine severity rank
+    sev_upper = severity_str.upper()
+    if "CRITICAL" in sev_upper:
+        severity_level = "CRITICAL"
+    elif "HIGH" in sev_upper:
+        severity_level = "HIGH"
+    elif "MEDIUM" in sev_upper or "MODERATE" in sev_upper:
+        severity_level = "MEDIUM"
+    elif "LOW" in sev_upper:
+        severity_level = "LOW"
+    elif "C:H/I:H/A:H" in sev_upper or "C:H/I:H" in sev_upper:
+        severity_level = "HIGH"
+    elif "C:H" in sev_upper or "I:H" in sev_upper:
+        severity_level = "MEDIUM"
+    else:
+        severity_level = "MEDIUM"
+
     return {
         "id": v.get("id", "UNKNOWN"),
         "summary": summary,
         "severity": severity_str,
+        "severity_level": severity_level,
+        "fixed": fixed_version,
         "aliases": v.get("aliases", [])
     }
 
