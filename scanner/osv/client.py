@@ -95,13 +95,14 @@ def parse_vuln_details(v: dict) -> dict:
     return {
         "id": v.get("id", "UNKNOWN"),
         "summary": summary,
-        "severity": severity_str
+        "severity": severity_str,
+        "aliases": v.get("aliases", [])
     }
 
 
 def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
     """
-    Return a list of vuln dict: [{id, summary, severity}, ...]
+    Return a list of vuln dict: [{id, summary, severity, aliases}, ...]
     Return [] if no version (unpinned) or no vulns found.
     """
     if not name or not version:
@@ -197,22 +198,36 @@ def check_dependencies(
         batch_results = resp.json().get("results", [])
 
         for (dep, eco), result in zip(chunk, batch_results):
-            vuln_ids = [v["id"] for v in result.get("vulns", [])]
+            raw_vulns = result.get("vulns", [])
             cache_key = f"{eco}:{dep.name}=={dep.version}"
 
-            if not vuln_ids:
+            if not raw_vulns:
                 cache[cache_key] = []
                 continue
 
+            seen_batch_ids = set()
+            unique_raw_vulns = []
+            for vuln in raw_vulns:
+                vid = vuln.get("id")
+                aliases = vuln.get("aliases", [])
+                ids = {vid, *aliases} if vid else set(aliases)
+                if ids & seen_batch_ids:
+                    continue
+                unique_raw_vulns.append(vuln)
+                seen_batch_ids.update(ids)
+
             details = []
-            for vid in vuln_ids:
+            for vuln in unique_raw_vulns:
+                vid = vuln.get("id")
+                if not vid:
+                    continue
                 try:
                     detail_resp = requests.get(f"https://api.osv.dev/v1/vulns/{vid}", timeout=10)
                     detail_resp.raise_for_status()
                     v = detail_resp.json()
                     details.append(parse_vuln_details(v))
                 except requests.exceptions.RequestException as e:
-                    print(f"Failed to fetch detail for {vid}: {e}")
+                    details.append(parse_vuln_details(vuln))
 
             cache[cache_key] = details
             results[f"{dep.name}=={dep.version}"] = [
@@ -224,7 +239,6 @@ def check_dependencies(
 
     _save_cache(cache)
     return results
-
 
 
 def check_host_packages(
@@ -248,12 +262,30 @@ def is_actionable(vuln: dict) -> bool:
 
 
 def filter_actionable_vulns(package_vulns: dict[str, list[dict]]) -> dict[str, list[dict]]:
-    """Drop packages whose only hits are Debian Urgency (non-CVSS) noise."""
+    """Drop packages whose only hits are Debian Urgency (non-CVSS) noise and deduplicate GHSA/PYSEC/CVE aliases."""
     filtered = {}
     for pkg, vulns in package_vulns.items():
         actionable = [v for v in vulns if is_actionable(v)]
-        if actionable:
-            filtered[pkg] = actionable
+        if not actionable:
+            continue
+
+        seen_ids = set()
+        deduped = []
+        for v in actionable:
+            vid = v.get("id")
+            aliases = v.get("aliases", [])
+            all_ids = {vid, *aliases} if vid else set(aliases)
+
+            if all_ids & seen_ids:
+                continue
+
+            deduped.append(v)
+            seen_ids.update(all_ids)
+
+        if deduped:
+            filtered[pkg] = deduped
+
     return filtered
+
 
 
