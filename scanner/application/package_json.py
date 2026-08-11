@@ -21,7 +21,10 @@ def parse_package_json(path: Path = Path("package.json")) -> list[Dependency]:
             packages.append(Dependency(
                 name=name,
                 version=clean_version,
-                ecosystem="npm"
+                ecosystem="npm",
+                source="package.json",
+                location=str(path)
             ))
 
     return packages
+

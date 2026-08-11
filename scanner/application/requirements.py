@@ -23,7 +23,13 @@ def parse_requirements(path: Path = Path("requirements.txt")) -> list[Dependency
 
                 if "==" in line:
                     package, version = line.split("==", 1)
-                    packages.append(Dependency(name=package.strip(), version=version.strip(), ecosystem="PyPI"))
+                    packages.append(Dependency(
+                        name=package.strip(),
+                        version=version.strip(),
+                        ecosystem="PyPI",
+                        source="requirements.txt",
+                        location=str(path)
+                    ))
                     continue
 
                 if any(op in line for op in unsupported_operators):
@@ -34,8 +40,11 @@ def parse_requirements(path: Path = Path("requirements.txt")) -> list[Dependency
                     Dependency(
                         name=line,
                         version=None,
-                        ecosystem="PyPI"
+                        ecosystem="PyPI",
+                        source="requirements.txt",
+                        location=str(path)
                     ))
+
     except OSError:
         return []
 
