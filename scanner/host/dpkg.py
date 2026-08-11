@@ -18,6 +18,7 @@ def get_installed_packages_dpkg() -> list[Dependency]:
             continue
         name, version = line.split(" ", 1)
         dependencies.append(
-            Dependency(name=name, version=version, ecosystem="dpkg")
+            Dependency(name=name, version=version, ecosystem="dpkg", source="dpkg", location="host")
         )
     return dependencies
+
