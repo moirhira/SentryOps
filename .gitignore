@@ -2,4 +2,6 @@ __pycache__/
 *.pyc
 .sentryops_cache.json
 report.json
+*.egg-info/
+
 

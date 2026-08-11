@@ -137,14 +137,15 @@ Running `python3 scanner/main.py scan <target>` scans the selected domain(s) and
 
 ```bash
 # Scan Linux OS installed packages
-python3 scanner/main.py scan host
+sentryops scan host
 
 # Scan application dependency manifests (requirements.txt, package.json)
-python3 scanner/main.py scan dependencies
+sentryops scan dependencies
 
 # Scan container base image manifests (Dockerfile)
-python3 scanner/main.py scan container
+sentryops scan container
 
 # Scan all target domains (default)
-python3 scanner/main.py scan all
+sentryops scan all
 ```
+
