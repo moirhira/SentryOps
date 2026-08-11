@@ -44,7 +44,10 @@ def parse_dockerfile(path: Path = Path("Dockerfile")) -> list[Dependency]:
         packages.append(Dependency(
             name=name,
             version=version,
-            ecosystem="docker"
+            ecosystem="docker",
+            source="Dockerfile",
+            location=str(path)
         ))
 
     return packages
+

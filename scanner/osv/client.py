@@ -169,7 +169,10 @@ def check_dependencies(
         cache_key = f"{target_ecosystem}:{dep.name}=={dep.version}"
         if cache_key in cache:
             if cache[cache_key]:
-                results[f"{dep.name}=={dep.version}"] = cache[cache_key]
+                results[f"{dep.name}=={dep.version}"] = [
+                    {**v, "source": dep.source, "location": dep.location}
+                    for v in cache[cache_key]
+                ]
         else:
             to_query.append((dep, target_ecosystem))
 
@@ -212,12 +215,16 @@ def check_dependencies(
                     print(f"Failed to fetch detail for {vid}: {e}")
 
             cache[cache_key] = details
-            results[f"{dep.name}=={dep.version}"] = details
+            results[f"{dep.name}=={dep.version}"] = [
+                {**v, "source": dep.source, "location": dep.location}
+                for v in details
+            ]
 
         time.sleep(0.5)
 
     _save_cache(cache)
     return results
+
 
 
 def check_host_packages(
