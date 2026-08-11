@@ -1,17 +1,10 @@
-from pathlib import Path
 import json
-from .models import Dependency
+from pathlib import Path
+from scanner.models import Dependency
 
-def parse_package_json(path: Path) -> list[Dependency]:
-    """
-    Parse a package.json file and return a list of dependencies.
 
-    Args:
-        path (Path): The path to the package.json file.
-
-    Returns:
-        List[Dependency]: A list of Dependency objects representing the dependencies.
-    """
+def parse_package_json(path: Path = Path("package.json")) -> list[Dependency]:
+    """Parse a package.json file and return a list of npm dependencies."""
     packages = []
 
     if not path.exists():
@@ -24,9 +17,10 @@ def parse_package_json(path: Path) -> list[Dependency]:
 
     for section in ("dependencies", "devDependencies"):
         for name, version in data.get(section, {}).items():
+            clean_version = version.lstrip("^~") if isinstance(version, str) else version
             packages.append(Dependency(
                 name=name,
-                version=version,
+                version=clean_version,
                 ecosystem="npm"
             ))
 

@@ -5,4 +5,3 @@ class Dependency:
     name: str
     version: str | None
     ecosystem: str
-

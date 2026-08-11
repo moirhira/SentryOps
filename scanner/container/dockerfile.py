@@ -1,14 +1,9 @@
 from pathlib import Path
-from .models import Dependency
+from scanner.models import Dependency
 
-def parse_dockerfile(path: Path) -> list[Dependency]:
-    """
-    Parse a Dockerfile and return a list of dependencies.
 
-    Args:
-        path (Path): The path to the Dockerfile.
-    """
-
+def parse_dockerfile(path: Path = Path("Dockerfile")) -> list[Dependency]:
+    """Parse a Dockerfile and return base image dependencies."""
     packages = []
 
     if not path.exists():
@@ -33,7 +28,7 @@ def parse_dockerfile(path: Path) -> list[Dependency]:
                 continue
             if token.upper() == "AS":
                 break
-            
+
             image = token
             break
 
