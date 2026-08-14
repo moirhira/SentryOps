@@ -84,17 +84,18 @@ def evaluate_affected_range(
     installed_ver: str,
     affected_list: list[dict[str, Any]],
     target_ecosystem: str
-) -> tuple[bool, str | None, str | None]:
+) -> tuple[bool, str | None, dict[str, Any] | None]:
     """
     Evaluate if installed_ver is vulnerable under target_ecosystem based on OSV affected entries.
 
     Returns:
-        (is_vulnerable, fixed_version, match_reason)
+        (is_vulnerable, fixed_version, match_info_dict)
     """
     if not installed_ver or not affected_list:
         return False, None, None
 
     target_eco_upper = target_ecosystem.upper()
+    comparator_type = "dpkg" if ("DEBIAN" in target_eco_upper or "UBUNTU" in target_eco_upper or target_eco_upper == "DPKG") else "semver"
 
     # 1. Filter affected list strictly matching target_ecosystem
     matching_affected = []
@@ -102,56 +103,62 @@ def evaluate_affected_range(
         pkg_eco = (aff.get("package", {}).get("ecosystem") or "").upper()
         if not pkg_eco:
             continue
-        # Exact match or matching prefix (e.g. Debian:13 matches Debian:13)
         if pkg_eco == target_eco_upper or target_eco_upper in pkg_eco or pkg_eco in target_eco_upper:
             matching_affected.append(aff)
 
     if not matching_affected:
-        # Advisory does not apply to target_ecosystem!
         return False, None, None
 
+    # Filter out entries marked with 'unimportant' urgency by Debian Security Tracker
+    non_unimportant = []
     for aff in matching_affected:
-        # Check ranges (ECOSYSTEM / SEMVER / GIT)
-        ranges = aff.get("ranges", [])
-        for r in ranges:
-            events = r.get("events", [])
-            introduced = None
-            fixed = None
+        urgency = aff.get("ecosystem_specific", {}).get("urgency") if aff.get("ecosystem_specific") else None
+        if urgency == "unimportant":
+            continue
+        non_unimportant.append(aff)
 
-            for ev in events:
-                if isinstance(ev, dict):
-                    if "introduced" in ev:
-                        introduced = ev["introduced"]
-                    if "fixed" in ev:
-                        fixed = ev["fixed"]
+    if not non_unimportant:
+        return False, None, None
 
-            # Case A: Range has a fixed version
-            if fixed:
-                # If installed_ver < fixed:
-                is_less = compare_versions(installed_ver, "lt", fixed, target_ecosystem)
-                if is_less:
-                    # Check introduced if present and not "0"
-                    if introduced and introduced != "0":
-                        is_ge_intro = compare_versions(installed_ver, "ge", introduced, target_ecosystem)
-                        if not is_ge_intro:
-                            continue # Installed version is older than introduced
+    # Priority 1: Check fixed version ranges across target_ecosystem entries
+    fixed_versions = []
+    for aff in non_unimportant:
+        for r in aff.get("ranges", []):
+            for ev in r.get("events", []):
+                if isinstance(ev, dict) and "fixed" in ev:
+                    fixed_versions.append(ev["fixed"])
 
-                    reason = f"Installed {installed_ver} < fixed {fixed} in {target_ecosystem}"
-                    return True, fixed, reason
-                else:
-                    # Installed version is >= fixed -> Patched!
-                    continue
+    if fixed_versions:
+        # Check if installed_ver is less than ANY fixed version
+        for fix in fixed_versions:
+            if compare_versions(installed_ver, "lt", fix, target_ecosystem):
+                match_info = {
+                    "ecosystem": target_ecosystem,
+                    "introduced": "0",
+                    "fixed": fix,
+                    "comparison": f"installed ({installed_ver}) < fixed ({fix})",
+                    "version_comparator": comparator_type,
+                    "result": "affected",
+                }
+                return True, fix, match_info
+        # Installed version is >= all fixed versions -> Patched!
+        return False, fixed_versions[0], None
 
-            # Case B: Range has introduced but no fixed version (unpatched / active vuln)
-            elif introduced:
-                if introduced == "0" or compare_versions(installed_ver, "ge", introduced, target_ecosystem):
-                    reason = f"Installed {installed_ver} >= introduced {introduced} (unpatched in {target_ecosystem})"
-                    return True, "None", reason
-
-        # Check explicit versions list if present
-        versions_list = aff.get("versions", [])
-        if versions_list and installed_ver in versions_list:
-            reason = f"Installed {installed_ver} explicitly listed in affected versions for {target_ecosystem}"
-            return True, "None", reason
+    # Priority 2: Unpatched / active vulnerability (no fixed version in range)
+    for aff in non_unimportant:
+        for r in aff.get("ranges", []):
+            for ev in r.get("events", []):
+                if isinstance(ev, dict) and "introduced" in ev:
+                    intro = ev["introduced"]
+                    if intro == "0" or compare_versions(installed_ver, "ge", intro, target_ecosystem):
+                        match_info = {
+                            "ecosystem": target_ecosystem,
+                            "introduced": intro,
+                            "fixed": None,
+                            "comparison": f"installed ({installed_ver}) >= introduced ({intro})",
+                            "version_comparator": comparator_type,
+                            "result": "affected",
+                        }
+                        return True, "None", match_info
 
     return False, None, None
