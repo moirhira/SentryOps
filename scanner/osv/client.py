@@ -60,11 +60,45 @@ def _save_cache(cache: dict) -> None:
         print(f"Warning: Failed to save cache: {e}")
 
 
-def parse_vuln_details(v: dict) -> dict:
+from scanner.osv.version import evaluate_affected_range
+
+
+def parse_vuln_details(
+    v: dict,
+    target_ecosystem: str = "dpkg",
+    installed_ver: str | None = None
+) -> dict | None:
     """
-    Extract summary/details, severity/urgency, and fixed versions from OSV vulnerability dictionary.
-    Handles Debian OSV schema specifics (details instead of summary, CVSS severity arrays, ecosystem_specific urgency).
+    Extract summary/details, severity/urgency, and evaluate fixed versions from OSV vulnerability dictionary.
+    Scopes evaluation strictly to target_ecosystem and installed_ver.
+    Returns None if the vulnerability does not affect target_ecosystem / installed_ver.
     """
+    affected_list = v.get("affected", []) or v.get("raw_affected", [])
+
+    is_vulnerable = True
+    fixed_ver = None
+    match_reason = None
+
+    if installed_ver and affected_list:
+        is_vulnerable, fixed_ver, match_reason = evaluate_affected_range(
+            installed_ver=installed_ver,
+            affected_list=affected_list,
+            target_ecosystem=target_ecosystem,
+        )
+        if not is_vulnerable:
+            return None
+    else:
+        # Fallback if installed_ver is not supplied
+        if affected_list:
+            for aff in affected_list:
+                pkg_eco = (aff.get("package", {}).get("ecosystem") or "").upper()
+                if target_ecosystem.upper() in pkg_eco or pkg_eco in target_ecosystem.upper():
+                    for r in aff.get("ranges", []):
+                        for event in r.get("events", []):
+                            if isinstance(event, dict) and "fixed" in event:
+                                fixed_ver = event["fixed"]
+                                break
+
     summary = v.get("summary") or v.get("details") or "No summary available"
 
     severity_str = None
@@ -80,9 +114,9 @@ def parse_vuln_details(v: dict) -> dict:
         if db_sev:
             severity_str = str(db_sev)
 
-    if not severity_str and v.get("affected"):
+    if not severity_str and affected_list:
         urgencies = []
-        for aff in v.get("affected", []):
+        for aff in affected_list:
             urgency = aff.get("ecosystem_specific", {}).get("urgency") if aff.get("ecosystem_specific") else None
             if urgency and urgency not in urgencies:
                 urgencies.append(urgency)
@@ -92,44 +126,15 @@ def parse_vuln_details(v: dict) -> dict:
     if not severity_str:
         severity_str = "No severity available"
 
-    # Extract fixed version if present in affected ranges
-    fixed_version = None
-    if v.get("affected"):
-        for aff in v.get("affected", []):
-            for r in aff.get("ranges", []):
-                for event in r.get("events", []):
-                    if isinstance(event, dict) and "fixed" in event:
-                        fixed_version = event["fixed"]
-                        break
-                if fixed_version:
-                    break
-            if fixed_version:
-                break
-
-    # Determine severity rank
-    sev_upper = severity_str.upper()
-    if "CRITICAL" in sev_upper:
-        severity_level = "CRITICAL"
-    elif "HIGH" in sev_upper:
-        severity_level = "HIGH"
-    elif "MEDIUM" in sev_upper or "MODERATE" in sev_upper:
-        severity_level = "MEDIUM"
-    elif "LOW" in sev_upper:
-        severity_level = "LOW"
-    elif "C:H/I:H/A:H" in sev_upper or "C:H/I:H" in sev_upper:
-        severity_level = "HIGH"
-    elif "C:H" in sev_upper or "I:H" in sev_upper:
-        severity_level = "MEDIUM"
-    else:
-        severity_level = "MEDIUM"
-
     return {
         "id": v.get("id", "UNKNOWN"),
         "summary": summary,
         "severity": severity_str,
-        "severity_level": severity_level,
-        "fixed": fixed_version,
-        "aliases": v.get("aliases", [])
+        "fixed": fixed_ver or "None",
+        "ecosystem": target_ecosystem,
+        "match_reason": match_reason or f"Matched in {target_ecosystem}",
+        "aliases": v.get("aliases", []),
+        "raw_affected": affected_list,
     }
 
 
@@ -172,7 +177,9 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
 
     normalized = []
     for vuln in unique_vulns:
-        normalized.append(parse_vuln_details(vuln))
+        parsed = parse_vuln_details(vuln, target_ecosystem=ecosystem, installed_ver=version)
+        if parsed:
+            normalized.append(parsed)
 
     print(f"Found {len(normalized)} unique vulnerabilities for {name}=={version} in {ecosystem}.")
     return normalized
@@ -202,11 +209,13 @@ def check_dependencies(
 
         cache_key = f"{target_ecosystem}:{dep.name}=={dep.version}"
         if cache_key in cache:
-            if cache[cache_key]:
-                results[f"{dep.name}=={dep.version}"] = [
-                    {**v, "source": dep.source, "location": dep.location}
-                    for v in cache[cache_key]
-                ]
+            valid_cached = []
+            for item in cache[cache_key]:
+                parsed = parse_vuln_details(item, target_ecosystem=target_ecosystem, installed_ver=dep.version)
+                if parsed:
+                    valid_cached.append({**parsed, "source": dep.source, "location": dep.location})
+            if valid_cached:
+                results[f"{dep.name}=={dep.version}"] = valid_cached
         else:
             to_query.append((dep, target_ecosystem))
 
@@ -250,23 +259,26 @@ def check_dependencies(
                 seen_batch_ids.update(ids)
 
             details = []
+            parsed_valid_list = []
             for vuln in unique_raw_vulns:
                 vid = vuln.get("id")
-                if not vid:
-                    continue
-                try:
-                    detail_resp = requests.get(f"https://api.osv.dev/v1/vulns/{vid}", timeout=10)
-                    detail_resp.raise_for_status()
-                    v = detail_resp.json()
-                    details.append(parse_vuln_details(v))
-                except requests.exceptions.RequestException as e:
-                    details.append(parse_vuln_details(vuln))
+                full_v = vuln
+                if vid:
+                    try:
+                        detail_resp = requests.get(f"https://api.osv.dev/v1/vulns/{vid}", timeout=10)
+                        detail_resp.raise_for_status()
+                        full_v = detail_resp.json()
+                    except requests.exceptions.RequestException:
+                        pass
+
+                parsed = parse_vuln_details(full_v, target_ecosystem=eco, installed_ver=dep.version)
+                details.append(full_v)
+                if parsed:
+                    parsed_valid_list.append({**parsed, "source": dep.source, "location": dep.location})
 
             cache[cache_key] = details
-            results[f"{dep.name}=={dep.version}"] = [
-                {**v, "source": dep.source, "location": dep.location}
-                for v in details
-            ]
+            if parsed_valid_list:
+                results[f"{dep.name}=={dep.version}"] = parsed_valid_list
 
         time.sleep(0.5)
 
