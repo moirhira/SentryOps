@@ -77,10 +77,10 @@ def parse_vuln_details(
 
     is_vulnerable = True
     fixed_ver = None
-    match_reason = None
+    match_info = None
 
     if installed_ver and affected_list:
-        is_vulnerable, fixed_ver, match_reason = evaluate_affected_range(
+        is_vulnerable, fixed_ver, match_info = evaluate_affected_range(
             installed_ver=installed_ver,
             affected_list=affected_list,
             target_ecosystem=target_ecosystem,
@@ -98,6 +98,16 @@ def parse_vuln_details(
                             if isinstance(event, dict) and "fixed" in event:
                                 fixed_ver = event["fixed"]
                                 break
+
+    if not match_info:
+        match_info = {
+            "ecosystem": target_ecosystem,
+            "introduced": "0",
+            "fixed": fixed_ver,
+            "comparison": f"installed ({installed_ver}) matched",
+            "version_comparator": "dpkg" if "DEBIAN" in target_ecosystem.upper() or "UBUNTU" in target_ecosystem.upper() or target_ecosystem.upper() == "DPKG" else "semver",
+            "result": "affected",
+        }
 
     summary = v.get("summary") or v.get("details") or "No summary available"
 
@@ -130,9 +140,11 @@ def parse_vuln_details(
         "id": v.get("id", "UNKNOWN"),
         "summary": summary,
         "severity": severity_str,
+        "status": "affected",
         "fixed": fixed_ver or "None",
         "ecosystem": target_ecosystem,
-        "match_reason": match_reason or f"Matched in {target_ecosystem}",
+        "match": match_info,
+        "match_reason": match_info.get("comparison", f"Matched in {target_ecosystem}"),
         "aliases": v.get("aliases", []),
         "raw_affected": affected_list,
     }
