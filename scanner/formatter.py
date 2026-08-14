@@ -139,6 +139,8 @@ def build_scan_summary(
                     "installed": installed_version,
                     "fixed": v.get("fixed") or "None",
                     "severity": sev,
+                    "ecosystem": v.get("ecosystem", "unknown"),
+                    "match_reason": v.get("match_reason", "Matched advisory"),
                     "summary": v.get("summary", ""),
                     "category": category,
                 })
@@ -194,10 +196,12 @@ def render_human_readable(
         lines.append("")
         for f in critical_or_high:
             lines.append(f"{f['cve_id']}")
-            lines.append(f"Package:   {f['package']}")
-            lines.append(f"Installed: {f['installed']}")
-            lines.append(f"Fixed:     {f['fixed']}")
-            lines.append(f"Severity:  {f['severity']}")
+            lines.append(f"Package:      {f['package']}")
+            lines.append(f"Installed:    {f['installed']}")
+            lines.append(f"Fixed:        {f['fixed']}")
+            lines.append(f"Severity:     {f['severity']}")
+            lines.append(f"Ecosystem:    {f['ecosystem']}")
+            lines.append(f"Match Reason: {f['match_reason']}")
             lines.append("")
 
     lines.append("───────────────────────────")
@@ -235,7 +239,9 @@ def render_json_report(
                 "package": f["package"],
                 "installed": f["installed"],
                 "fixed": f["fixed"],
-                "severity": f["severity"]
+                "severity": f["severity"],
+                "ecosystem": f["ecosystem"],
+                "match_reason": f["match_reason"],
             }
             for f in summary["findings_list"]
         ]
