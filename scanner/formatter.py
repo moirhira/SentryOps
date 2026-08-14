@@ -137,9 +137,18 @@ def build_scan_summary(
                     "cve_id": v.get("id", "UNKNOWN"),
                     "package": pkg_name,
                     "installed": installed_version,
-                    "fixed": v.get("fixed") or "None",
+                    "fixed": v.get("fixed") if v.get("fixed") != "None" else None,
                     "severity": sev,
+                    "status": v.get("status", "affected"),
                     "ecosystem": v.get("ecosystem", "unknown"),
+                    "match": v.get("match", {
+                        "ecosystem": v.get("ecosystem", "unknown"),
+                        "introduced": "0",
+                        "fixed": v.get("fixed") if v.get("fixed") != "None" else None,
+                        "comparison": v.get("match_reason", "matched"),
+                        "version_comparator": "semver",
+                        "result": "affected",
+                    }),
                     "match_reason": v.get("match_reason", "Matched advisory"),
                     "summary": v.get("summary", ""),
                     "category": category,
@@ -195,10 +204,11 @@ def render_human_readable(
         lines.append("CRITICAL FINDINGS" if not any(f["severity"] == "HIGH" for f in critical_or_high) else "CRITICAL & HIGH FINDINGS")
         lines.append("")
         for f in critical_or_high:
+            fixed_str = f["fixed"] if f["fixed"] else "None"
             lines.append(f"{f['cve_id']}")
             lines.append(f"Package:      {f['package']}")
             lines.append(f"Installed:    {f['installed']}")
-            lines.append(f"Fixed:        {f['fixed']}")
+            lines.append(f"Fixed:        {fixed_str}")
             lines.append(f"Severity:     {f['severity']}")
             lines.append(f"Ecosystem:    {f['ecosystem']}")
             lines.append(f"Match Reason: {f['match_reason']}")
@@ -223,7 +233,8 @@ def render_json_report(
             "started_at": scan_meta.get("started_at", datetime.now().isoformat()),
             "duration": scan_meta.get("duration", 0.0),
             "target": scan_meta.get("target_name", "localhost"),
-            "type": scan_meta.get("target_type_short", "host")
+            "type": scan_meta.get("target_type_short", "host"),
+            "scan_types": scan_meta.get("scan_types", ["host"]),
         },
         "summary": {
             "packages": summary["packages"],
@@ -240,7 +251,9 @@ def render_json_report(
                 "installed": f["installed"],
                 "fixed": f["fixed"],
                 "severity": f["severity"],
+                "status": f["status"],
                 "ecosystem": f["ecosystem"],
+                "match": f["match"],
                 "match_reason": f["match_reason"],
             }
             for f in summary["findings_list"]

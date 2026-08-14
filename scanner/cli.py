@@ -92,6 +92,7 @@ def run_scan(
         scanned_counts["container"] = len(container_deps)
 
     duration = round(time.time() - start_time, 2)
+    scan_types = list(scanned_counts.keys())
 
     scan_meta = {
         "id": f"scan-{datetime.now().strftime('%Y%m%d')}-001",
@@ -101,6 +102,7 @@ def run_scan(
         "target_name": target_name,
         "target_type": target_type,
         "target_type_short": target_type_short,
+        "scan_types": scan_types,
     }
 
     summary = build_scan_summary(scanned_counts, findings_by_category)
