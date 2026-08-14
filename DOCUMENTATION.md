@@ -7,31 +7,74 @@
 * **Application**: Application dependency manifests (`requirements.txt` for Python/PyPI, `package.json` for Node.js/npm).
 * **Container**: Container base images (`Dockerfile`).
 
-All package discoveries are normalized into a common `Dependency` data structure containing `source` and `location` attributes. Findings are cross-referenced against the **OSV.dev API**, hydrated with CVSS severity vectors, filtered to exclude historical noise (`Debian Urgency: unimportant`), and exported to `report.json`.
+All package discoveries are normalized into a common `Dependency` data structure containing `source` and `location` attributes. Findings are cross-referenced against the **OSV.dev API**, hydrated with CVSS v3.1 severity vectors, evaluated with release-scoped version matching and `dpkg --compare-versions`, and rendered as **Human-Readable CLI reports** or **Machine-Readable JSON artifacts**.
 
 ---
 
-## 2. Target Domain & CLI Commands
+## 2. Target Domains & CLI Command Reference
+
+### Architecture Map
 
 ```text
 SentryOps
 │
-├── Host (sentryops scan host)
+├── Host Domain (sentryops scan host)
 │   ├── dpkg.py          --> Scans Debian/Ubuntu system packages (dpkg-query)
 │   ├── rpm.py           --> Scans RHEL/Fedora/CentOS system packages (rpm -qa)
 │   └── detector.py      --> Distro detector (/etc/os-release) & host scanner
 │
-├── Application (sentryops scan dependencies)
+├── Application Domain (sentryops scan app / sentryops scan dependencies)
 │   ├── requirements.py  --> Parses Python PyPI dependencies (requirements.txt)
 │   └── package_json.py  --> Parses Node.js npm dependencies (package.json)
 │
-└── Container (sentryops scan container)
+└── Container Domain (sentryops scan container / sentryops scan docker)
     └── dockerfile.py    --> Parses Container base images (Dockerfile)
+```
+
+### Complete Command & Alias Matrix
+
+| Target Command | Aliases | Target Domain Scanned | Description |
+| :--- | :--- | :--- | :--- |
+| **`sentryops scan host`** | `host` | **Host System** | Scans installed Linux OS packages using system package manager (`dpkg` or `rpm`). |
+| **`sentryops scan app`** | `dependencies`, `application` | **Application** | Scans application manifests (`requirements.txt`, `package.json`). |
+| **`sentryops scan container`**| `docker` | **Container** | Scans base images specified in `Dockerfile` manifests. |
+| **`sentryops scan all`** | `all` *(Default)* | **All 3 Domains** | Unified multi-domain scan across Host, Application, and Container targets. |
+
+---
+
+## 3. CLI Output Flags & Formatting Options
+
+SentryOps provides dual-level reporting (Human-Readable terminal display and Machine-Readable JSON):
+
+| Flag / Option | Short Flag | Values / Syntax | Description |
+| :--- | :--- | :--- | :--- |
+| **`--output`** | **`-o`** | `text` *(default)* | Outputs human-readable terminal report with summary counts and critical findings. |
+| **`--output`** | **`-o`** | `json` | Outputs formatted machine-readable JSON to stdout. |
+| **`--output`** | **`-o`** | `<filepath.json>` | Saves structured JSON report to specified file path (e.g. `-o report.json`). |
+| **`--format`** | **`-f`** | `text` \| `json` | Explicitly overrides the output format rendering. |
+
+### Command Examples
+
+```bash
+# 1. Human-Readable terminal scan for host packages
+sentryops scan host
+
+# 2. Human-Readable terminal scan for application dependencies (alias)
+sentryops scan dependencies
+
+# 3. Machine-Readable JSON stdout for automation pipelines
+sentryops scan app --output json
+
+# 4. Save JSON report to custom file path while displaying terminal summary
+sentryops scan all --output custom_report.json
+
+# 5. Explicit format option
+sentryops scan host --format json
 ```
 
 ---
 
-## 3. Normalized Core Data Model
+## 4. Normalized Core Data Model
 
 All domain scanners normalize package discoveries into the `Dependency` dataclass defined in [`scanner/models.py`](file:///home/takaya/Desktop/SentryOps/scanner/models.py):
 
@@ -52,100 +95,66 @@ class Dependency:
 | **Host** | [`scanner/host/dpkg.py`](file:///home/takaya/Desktop/SentryOps/scanner/host/dpkg.py) | `Debian:<ver>` / `Ubuntu:<ver>` | `dpkg` | `host` |
 | **Host** | [`scanner/host/rpm.py`](file:///home/takaya/Desktop/SentryOps/scanner/host/rpm.py) | `RHEL:<ver>` / `Fedora:<ver>` | `rpm` | `host` |
 | **Application** | [`scanner/application/requirements.py`](file:///home/takaya/Desktop/SentryOps/scanner/application/requirements.py) | `PyPI` | `requirements.txt` | `./requirements.txt` |
-| **Application** | [`scanner/application/package_json.py`](file:///home/takaya/Desktop/SentryOps/scanner/application/package_json.py) | `npm` | `package.json` | `./package.json` |
+| **Application** | [`scanner/application/package_json.py`](file:///home/takaya/Desktop/SentryOps/scanner/package_json.py) | `npm` | `package.json` | `./package.json` |
 | **Container** | [`scanner/container/dockerfile.py`](file:///home/takaya/Desktop/SentryOps/scanner/container/dockerfile.py) | `docker` | `Dockerfile` | `./Dockerfile` |
 
 ---
 
-## 4. Vulnerability Engine & OSV Integration ([scanner/osv/client.py](file:///home/takaya/Desktop/SentryOps/scanner/osv/client.py))
+## 5. Vulnerability Engine & Matching Mechanics ([scanner/osv/client.py](file:///home/takaya/Desktop/SentryOps/scanner/osv/client.py))
 
 ### Key Subsystems
 
-1. **OSV Ecosystem Mapping (`get_osv_ecosystem`)**:
-   * Maps detected host distro info (`os_id`, `version`) to OSV versioned ecosystems (e.g. `Debian:13` or `Ubuntu:22.04`).
+1. **Ecosystem-Scoped Matching (`evaluate_affected_range`)**:
+   * Scopes vulnerability evaluation strictly to the target ecosystem (e.g. `Debian:13`). Advisories for other releases (`Debian:11`, `Debian:12`) are ignored to prevent release leakage and false positives.
 
-2. **Debian Version Normalization (`normalize_debian_version`)**:
-   * Strips backport/build suffixes (`25.01+dfsg-1~deb13u2` -> `25.01`) for consistent version representation.
+2. **Debian Version Semantics (`compare_debian_versions`)**:
+   * Uses `dpkg --compare-versions <installed> lt <fixed>` via subprocess to handle Debian epochs (`2:`), revisions (`-7`), and backport tags (`~deb13u2`).
 
-3. **Batched API Processing (`check_dependencies`)**:
+3. **CVSS v3.1 Base Score Calculator ([scanner/formatter.py](file:///home/takaya/Desktop/SentryOps/scanner/formatter.py))**:
+   * Implements the FIRST.org CVSS v3.1 formula to compute exact numerical base scores (0.0 to 10.0) from CVSS vector strings, categorizing findings into `CRITICAL`, `HIGH`, `MEDIUM`, and `LOW`.
+
+4. **Match Reason Diagnostics**:
+   * Attaches an explicit `match_reason` string to every finding (e.g., `"Installed 1.7.1-6+deb13u2 < fixed 1.7.1-6+deb13u3 in Debian:13"`).
+
+5. **Batched API Processing (`check_dependencies`)**:
    * Utilizes `https://api.osv.dev/v1/querybatch` to query up to 1,000 packages per HTTP request, preventing rate-limiting issues across large package sets.
 
-4. **Detail Hydration & Location Tracking (`parse_vuln_details`)**:
-   * Fetches `/v1/vulns/{id}` for hits to extract `summary` and top-level `CVSS_V3`/`CVSS_V4` vectors, attaching `source` and `location` metadata to each finding.
-
-5. **Actionable Vulnerability Filtering (`is_actionable`)**:
-   * Filters out historical/disputed `Debian Urgency: unimportant` records. Only CVSS-scored entries are flagged as actionable.
-
-6. **Local Disk Caching**:
-   * Saves responses to [.sentryops_cache.json](file:///home/takaya/Desktop/SentryOps/.sentryops_cache.json) under `{ecosystem}:{name}=={version}`.
+6. **Local Disk Caching (`.sentryops_cache.json`)**:
+   * Caches raw OSV responses under `{ecosystem}:{name}=={version}` for sub-second repeat scans.
 
 ---
 
-## 5. Output & Report Specification
+## 6. Output Format Specification
 
-Running `python3 scanner/main.py scan <target>` scans the selected domain(s) and produces [report.json](file:///home/takaya/Desktop/SentryOps/report.json):
+### Machine-Readable JSON Schema (`--output json`)
 
 ```json
 {
-  "timestamp": "2026-08-11T11:18:42.457644+00:00",
-  "host": {
-    "os_name": "Debian GNU/Linux",
-    "os_id": "debian",
-    "version": "13",
-    "architecture": "x86_64"
+  "scan": {
+    "id": "scan-20260814-001",
+    "started_at": "2026-08-14T15:40:09Z",
+    "duration": 0.1,
+    "target": "application",
+    "type": "app"
   },
   "summary": {
-    "total_packages_scanned": 1898,
-    "packages_scanned_by_category": {
-      "host": 1897,
-      "application": 1,
-      "container": 0
-    },
-    "total_actionable_cves": 333
+    "packages": 1,
+    "vulnerabilities": 3,
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0
   },
-  "findings": {
-    "host": {
-      "7zip==25.01+dfsg-1~deb13u2": [
-        {
-          "id": "DEBIAN-CVE-2022-47111",
-          "summary": "7-Zip 22.01 does not report an error for certain invalid xz files...",
-          "severity": "CVSS_V3: CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
-          "source": "dpkg",
-          "location": "host"
-        }
-      ]
-    },
-    "application": {
-      "requests==2.31.0": [
-        {
-          "id": "GHSA-9hjg-9r4m-mvj7",
-          "summary": "Requests vulnerable to .netrc credentials leak via malicious URLs",
-          "severity": "CVSS_V3: CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N",
-          "source": "requirements.txt",
-          "location": "requirements.txt"
-        }
-      ]
-    },
-    "container": {}
-  }
+  "findings": [
+    {
+      "cve_id": "GHSA-9hjg-9r4m-mvj7",
+      "package": "requests",
+      "installed": "2.31.0",
+      "fixed": "2.32.4",
+      "severity": "MEDIUM",
+      "ecosystem": "PyPI",
+      "match_reason": "Installed 2.31.0 < fixed 2.32.4 in PyPI"
+    }
+  ]
 }
 ```
-
----
-
-## 6. CLI Execution Guide
-
-```bash
-# Scan Linux OS installed packages
-sentryops scan host
-
-# Scan application dependency manifests (requirements.txt, package.json)
-sentryops scan dependencies
-
-# Scan container base image manifests (Dockerfile)
-sentryops scan container
-
-# Scan all target domains (default)
-sentryops scan all
-```
-

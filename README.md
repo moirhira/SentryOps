@@ -109,73 +109,107 @@ Severity:  HIGH
 
 ---
 
-## 🚀 Quickstart & Usage
+## 🚀 Quickstart & CLI Command Reference
 
-### Human-Readable Terminal Output (Default)
+### Target Command Matrix & Aliases
+
+| Command | Target Aliases | What it Scans | Description |
+| :--- | :--- | :--- | :--- |
+| **`sentryops scan host`** | `host` | **Linux OS Packages** | Scans system packages via `dpkg` (Debian/Ubuntu) or `rpm` (RHEL/Fedora/CentOS). |
+| **`sentryops scan app`** | `dependencies`, `application` | **Application Dependencies** | Scans application manifests (`requirements.txt`, `package.json`). |
+| **`sentryops scan container`** | `docker` | **Container Images** | Scans base images specified in `Dockerfile` manifests. |
+| **`sentryops scan all`** | `all` *(Default)* | **All 3 Domains** | Unified multi-domain scan across Host, Application, and Container targets. |
+
+---
+
+### Output Options & Formatting Flags
+
+| Flag / Option | Short Flag | Values / Syntax | Description |
+| :--- | :--- | :--- | :--- |
+| **`--output`** | **`-o`** | `text` *(default)* | Renders human-readable terminal report with summary counts and findings. |
+| **`--output`** | **`-o`** | `json` | Outputs formatted machine-readable JSON to stdout. |
+| **`--output`** | **`-o`** | `<filepath.json>` | Saves structured JSON report to specified file path (e.g. `-o report.json`). |
+| **`--format`** | **`-f`** | `text` \| `json` | Explicitly sets the output format rendering. |
+
+---
+
+### Example Commands
 
 ```bash
+# 1. Scan Linux system packages (Human-Readable CLI)
 sentryops scan host
+
+# 2. Scan Application dependencies (using 'dependencies' or 'app' alias)
+sentryops scan dependencies
+sentryops scan app
+
+# 3. Output Machine-Readable JSON to stdout
+sentryops scan app --output json
+
+# 4. Save JSON report to file while displaying terminal summary
+sentryops scan all --output report.json
+
+# 5. Explicit format option
+sentryops scan host --format json
 ```
+
+---
+
+### Terminal Report Example
+
 ```text
 SentryOps Security Scanner
 ───────────────────────────
 
-Target:   localhost
-Type:     Linux Host
+Target:   application
+Type:     Application Dependencies
 OS:       Debian GNU/Linux 13
 Manager:  dpkg
 
-Packages scanned: 1897
+Packages scanned: 1
 
 Vulnerabilities
 ───────────────────────────
 
-CRITICAL  15
-HIGH      109
-MEDIUM    154
-LOW       52
+CRITICAL  0
+HIGH      0
+MEDIUM    3
+LOW       0
 
 CRITICAL & HIGH FINDINGS
-
-DEBIAN-CVE-2026-6653
-Package:   libxml2
-Installed: 2.12.7+dfsg+really2.9.14-2.1+deb13u3
-Fixed:     2.14.5+dfsg-0.1
-Severity:  CRITICAL
 ...
 ───────────────────────────
 Scan completed in 0.1s (cached)
 ```
 
-### Machine-Readable JSON Output
+### Machine-Readable JSON Report Example
 
-```bash
-sentryops scan host --output json
-```
 ```json
 {
   "scan": {
-    "id": "scan-20260813-001",
-    "started_at": "2026-08-13T14:30:00Z",
+    "id": "scan-20260814-001",
+    "started_at": "2026-08-14T15:40:09Z",
     "duration": 0.1,
-    "target": "localhost",
-    "type": "host"
+    "target": "application",
+    "type": "app"
   },
   "summary": {
-    "packages": 1897,
-    "vulnerabilities": 330,
-    "critical": 15,
-    "high": 109,
-    "medium": 154,
-    "low": 52
+    "packages": 1,
+    "vulnerabilities": 3,
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0
   },
   "findings": [
     {
-      "cve_id": "DEBIAN-CVE-2026-6653",
-      "package": "libxml2",
-      "installed": "2.12.7+dfsg+really2.9.14-2.1+deb13u3",
-      "fixed": "2.14.5+dfsg-0.1",
-      "severity": "CRITICAL"
+      "cve_id": "GHSA-9hjg-9r4m-mvj7",
+      "package": "requests",
+      "installed": "2.31.0",
+      "fixed": "2.32.4",
+      "severity": "MEDIUM",
+      "ecosystem": "PyPI",
+      "match_reason": "Installed 2.31.0 < fixed 2.32.4 in PyPI"
     }
   ]
 }
