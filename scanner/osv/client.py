@@ -60,52 +60,77 @@ def _save_cache(cache: dict) -> None:
         print(f"Warning: Failed to save cache: {e}")
 
 
-from scanner.osv.version import evaluate_affected_range
+from scanner.osv.version import evaluate_affected_range, EvaluationResult
 
 
 def parse_vuln_details(
     v: dict,
     target_ecosystem: str = "dpkg",
-    installed_ver: str | None = None
+    installed_ver: str | None = None,
+    package_name: str = "",
 ) -> dict | None:
     """
     Extract summary/details, severity/urgency, and evaluate fixed versions from OSV vulnerability dictionary.
-    Scopes evaluation strictly to target_ecosystem and installed_ver.
-    Returns None if the vulnerability does not affect target_ecosystem / installed_ver.
+    Scopes evaluation strictly to target_ecosystem, package_name, and installed_ver.
+    Returns None if the vulnerability does not affect target_ecosystem / package_name / installed_ver.
     """
     affected_list = v.get("affected", []) or v.get("raw_affected", [])
 
-    is_vulnerable = True
+    eval_result: EvaluationResult | None = None
     fixed_ver = None
     match_info = None
 
     if installed_ver and affected_list:
-        is_vulnerable, fixed_ver, match_info = evaluate_affected_range(
+        eval_result = evaluate_affected_range(
             installed_ver=installed_ver,
             affected_list=affected_list,
             target_ecosystem=target_ecosystem,
+            package_name=package_name,
         )
-        if not is_vulnerable:
+        if eval_result is None:
             return None
+
+        fixed_ver = eval_result.range.get("fixed")
+        match_info = {
+            "ecosystem": eval_result.ecosystem,
+            "range": eval_result.range,
+            "installed_version": eval_result.installed_version,
+            "comparator": eval_result.comparator,
+            "result": "affected",
+        }
     else:
-        # Fallback if installed_ver is not supplied
+        # Fallback if installed_ver is not supplied — filter by ecosystem AND package name
         if affected_list:
+            target_eco_upper = target_ecosystem.upper()
+            pkg_name_lower = package_name.lower() if package_name else ""
             for aff in affected_list:
-                pkg_eco = (aff.get("package", {}).get("ecosystem") or "").upper()
-                if target_ecosystem.upper() in pkg_eco or pkg_eco in target_ecosystem.upper():
-                    for r in aff.get("ranges", []):
-                        for event in r.get("events", []):
-                            if isinstance(event, dict) and "fixed" in event:
-                                fixed_ver = event["fixed"]
-                                break
+                pkg = aff.get("package", {})
+                pkg_eco = (pkg.get("ecosystem") or "").upper()
+                pkg_name = (pkg.get("name") or "").lower()
+                if pkg_eco != target_eco_upper:
+                    continue
+                if pkg_name_lower and pkg_name != pkg_name_lower:
+                    continue
+                for r in aff.get("ranges", []):
+                    for event in r.get("events", []):
+                        if isinstance(event, dict) and "fixed" in event:
+                            fixed_ver = event["fixed"]
+                            break
+                    if fixed_ver:
+                        break
+                if fixed_ver:
+                    break
 
     if not match_info:
+        comparator_type = "dpkg" if ("DEBIAN" in target_ecosystem.upper() or "UBUNTU" in target_ecosystem.upper() or target_ecosystem.upper() == "DPKG") else "semver"
         match_info = {
             "ecosystem": target_ecosystem,
-            "introduced": "0",
-            "fixed": fixed_ver,
-            "comparison": f"installed ({installed_ver}) matched",
-            "version_comparator": "dpkg" if "DEBIAN" in target_ecosystem.upper() or "UBUNTU" in target_ecosystem.upper() or target_ecosystem.upper() == "DPKG" else "semver",
+            "range": {
+                "introduced": "0",
+                "fixed": fixed_ver,
+            },
+            "installed_version": installed_ver or "unknown",
+            "comparator": comparator_type,
             "result": "affected",
         }
 
@@ -136,15 +161,24 @@ def parse_vuln_details(
     if not severity_str:
         severity_str = "No severity available"
 
+    # Build match_reason from the range info
+    rng = match_info.get("range", {})
+    rng_fixed = rng.get("fixed")
+    rng_intro = rng.get("introduced", "0")
+    if rng_fixed:
+        match_reason = f"Installed {installed_ver} < fixed {rng_fixed} in {target_ecosystem}"
+    else:
+        match_reason = f"Installed {installed_ver} >= introduced {rng_intro}, no fix in {target_ecosystem}"
+
     return {
         "id": v.get("id", "UNKNOWN"),
         "summary": summary,
         "severity": severity_str,
         "status": "affected",
-        "fixed": fixed_ver or "None",
+        "fixed": fixed_ver if fixed_ver else None,
         "ecosystem": target_ecosystem,
         "match": match_info,
-        "match_reason": match_info.get("comparison", f"Matched in {target_ecosystem}"),
+        "match_reason": match_reason,
         "aliases": v.get("aliases", []),
         "raw_affected": affected_list,
     }
@@ -189,7 +223,7 @@ def check_package(name: str, version: str, ecosystem: str) -> list[dict]:
 
     normalized = []
     for vuln in unique_vulns:
-        parsed = parse_vuln_details(vuln, target_ecosystem=ecosystem, installed_ver=version)
+        parsed = parse_vuln_details(vuln, target_ecosystem=ecosystem, installed_ver=version, package_name=name)
         if parsed:
             normalized.append(parsed)
 
@@ -223,7 +257,7 @@ def check_dependencies(
         if cache_key in cache:
             valid_cached = []
             for item in cache[cache_key]:
-                parsed = parse_vuln_details(item, target_ecosystem=target_ecosystem, installed_ver=dep.version)
+                parsed = parse_vuln_details(item, target_ecosystem=target_ecosystem, installed_ver=dep.version, package_name=dep.name)
                 if parsed:
                     valid_cached.append({**parsed, "source": dep.source, "location": dep.location})
             if valid_cached:
@@ -283,7 +317,7 @@ def check_dependencies(
                     except requests.exceptions.RequestException:
                         pass
 
-                parsed = parse_vuln_details(full_v, target_ecosystem=eco, installed_ver=dep.version)
+                parsed = parse_vuln_details(full_v, target_ecosystem=eco, installed_ver=dep.version, package_name=dep.name)
                 details.append(full_v)
                 if parsed:
                     parsed_valid_list.append({**parsed, "source": dep.source, "location": dep.location})
