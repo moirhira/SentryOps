@@ -1,6 +1,12 @@
 # SentryOps — Infrastructure & Application Vulnerability Scanner
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Test Suite](https://img.shields.io/badge/tests-10%20passed-brightgreen.svg)](tests/test_engine.py)
+
 **SentryOps** is a lightweight, agentless DevSecOps vulnerability scanner built in Python. It scans system packages, application manifests, and container base images, cross-references dependencies against the [OSV.dev API](https://osv.dev) in batch queries, calculates exact CVSS v3.1 base scores, and generates both **Human-Readable** CLI reports and **Machine-Readable JSON** artifacts.
+
+For complete, detailed technical documentation explaining every function, algorithm, CVSS formula, and architectural detail, see **[DOCUMENTATION.md](DOCUMENTATION.md)**.
 
 ---
 
