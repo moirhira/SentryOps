@@ -18,6 +18,15 @@ class EvaluationResult:
     range: dict[str, str | None]  # {"introduced": "0", "fixed": "1.2.3"} or {"introduced": "0", "fixed": None}
     comparator: str  # "dpkg" or "semver"
 
+    def to_match_dict(self) -> dict[str, Any]:
+        return {
+            "ecosystem": self.ecosystem,
+            "range": self.range,
+            "installed_version": self.installed_version,
+            "comparator": self.comparator,
+            "result": "affected" if self.is_affected else "not_affected",
+        }
+
 
 def compare_debian_versions(v1: str, op: str, v2: str) -> bool:
     """
@@ -111,7 +120,6 @@ def _parse_event_ranges(events: list[dict]) -> list[dict[str, str | None]]:
             continue
 
         if "introduced" in event:
-            # If a previous introduced range was open, close it as open-ended
             if current_introduced is not None:
                 ranges.append({
                     "introduced": current_introduced,
@@ -138,7 +146,6 @@ def _parse_event_ranges(events: list[dict]) -> list[dict[str, str | None]]:
                 })
                 current_introduced = None
 
-    # If an introduced range remains open at the end
     if current_introduced is not None:
         ranges.append({
             "introduced": current_introduced,
@@ -179,11 +186,9 @@ def evaluate_affected_range(
         pkg_eco = (pkg.get("ecosystem") or "").upper()
         pkg_name = (pkg.get("name") or "").lower()
 
-        # Exact ecosystem match only
         if pkg_eco != target_eco_upper:
             continue
 
-        # Exact package name match (if package_name is provided)
         if pkg_name_lower and pkg_name != pkg_name_lower:
             continue
 
@@ -203,100 +208,59 @@ def evaluate_affected_range(
     if not non_unimportant:
         return None
 
-    # 3. Collect ALL parsed ranges across all matching affected entries,
-    #    separated into fixed-ranges and open-ended ranges.
-    #    Fixed-version ranges take strict priority over open-ended ranges.
-    fixed_ranges: list[tuple[dict, str]] = []    # (parsed_range, aff_pkg_name)
-    open_ranges: list[tuple[dict, str]] = []     # (parsed_range, aff_pkg_name)
-
+    # 3. Priority 1: Evaluate ranges with fixed versions first
+    fixed_ranges: list[tuple[str, str, str]] = []
     for aff in non_unimportant:
         aff_pkg_name = (aff.get("package", {}).get("name") or package_name or "")
-
         for r in aff.get("ranges", []):
             events = r.get("events", [])
-            parsed_ranges = _parse_event_ranges(events)
-
-            for pr in parsed_ranges:
+            for pr in _parse_event_ranges(events):
                 if pr["fixed"] is not None:
-                    fixed_ranges.append((pr, aff_pkg_name))
-                else:
-                    open_ranges.append((pr, aff_pkg_name))
+                    fixed_ranges.append((pr["introduced"] or "0", pr["fixed"], aff_pkg_name))
 
-    # 4. Priority 1: Evaluate fixed-version ranges
-    #    If installed < fixed for any range → AFFECTED (with fix available)
-    #    If installed >= fixed for ALL ranges → PATCHED (not affected)
     if fixed_ranges:
-        has_vulnerable_range = False
-        for pr, aff_pkg_name in fixed_ranges:
-            introduced = pr["introduced"]
-            fixed = pr["fixed"]
-
-            # Check: installed_ver >= introduced
-            if introduced == "0":
-                in_introduced = True
-            else:
-                in_introduced = compare_versions(installed_ver, "ge", introduced, target_ecosystem)
-
-            if not in_introduced:
-                continue
-
-            # Check: installed_ver < fixed
+        for introduced, fixed, aff_pkg_name in fixed_ranges:
             if compare_versions(installed_ver, "lt", fixed, target_ecosystem):
-                # AFFECTED: installed is in [introduced, fixed)
-                return EvaluationResult(
-                    is_affected=True,
-                    ecosystem=target_ecosystem,
-                    package_name=aff_pkg_name,
-                    installed_version=installed_ver,
-                    range={"introduced": introduced, "fixed": fixed},
-                    comparator=comparator_type,
-                )
-            else:
-                # installed >= fixed → this range says PATCHED
-                has_vulnerable_range = False
+                if introduced == "0" or compare_versions(installed_ver, "ge", introduced, target_ecosystem):
+                    return EvaluationResult(
+                        is_affected=True,
+                        ecosystem=target_ecosystem,
+                        package_name=aff_pkg_name,
+                        installed_version=installed_ver,
+                        range={"introduced": introduced, "fixed": fixed},
+                        comparator=comparator_type,
+                    )
+        # Installed version is >= all fixed versions -> Patched!
+        return None
 
-        # If we had fixed ranges and installed >= all of them → PATCHED
-        if not has_vulnerable_range:
-            return None
+    # 4. Priority 2: Evaluate open-ended ranges (no fix available)
+    for aff in non_unimportant:
+        aff_pkg_name = (aff.get("package", {}).get("name") or package_name or "")
+        for r in aff.get("ranges", []):
+            events = r.get("events", [])
+            for pr in _parse_event_ranges(events):
+                introduced = pr["introduced"] or "0"
+                last_affected = pr["last_affected"]
 
-    # 5. Priority 2: Evaluate open-ended ranges (no fix available)
-    for pr, aff_pkg_name in open_ranges:
-        introduced = pr["introduced"]
-        last_affected = pr.get("last_affected")
+                if introduced == "0" or compare_versions(installed_ver, "ge", introduced, target_ecosystem):
+                    if last_affected is not None:
+                        if compare_versions(installed_ver, "le", last_affected, target_ecosystem):
+                            return EvaluationResult(
+                                is_affected=True,
+                                ecosystem=target_ecosystem,
+                                package_name=aff_pkg_name,
+                                installed_version=installed_ver,
+                                range={"introduced": introduced, "fixed": None, "last_affected": last_affected},
+                                comparator=comparator_type,
+                            )
+                    else:
+                        return EvaluationResult(
+                            is_affected=True,
+                            ecosystem=target_ecosystem,
+                            package_name=aff_pkg_name,
+                            installed_version=installed_ver,
+                            range={"introduced": introduced, "fixed": None},
+                            comparator=comparator_type,
+                        )
 
-        # Check: installed_ver >= introduced
-        if introduced == "0":
-            in_introduced = True
-        else:
-            in_introduced = compare_versions(installed_ver, "ge", introduced, target_ecosystem)
-
-        if not in_introduced:
-            continue
-
-        # Check: if last_affected exists, installed_ver <= last_affected
-        if last_affected is not None:
-            if compare_versions(installed_ver, "le", last_affected, target_ecosystem):
-                return EvaluationResult(
-                    is_affected=True,
-                    ecosystem=target_ecosystem,
-                    package_name=aff_pkg_name,
-                    installed_version=installed_ver,
-                    range={"introduced": introduced, "fixed": None, "last_affected": last_affected},
-                    comparator=comparator_type,
-                )
-            else:
-                # installed > last_affected → NOT affected by this range
-                continue
-
-        # Open-ended range: [introduced, ∞) — no fix available
-        return EvaluationResult(
-            is_affected=True,
-            ecosystem=target_ecosystem,
-            package_name=aff_pkg_name,
-            installed_version=installed_ver,
-            range={"introduced": introduced, "fixed": None},
-            comparator=comparator_type,
-        )
-
-    # No range matched → NOT AFFECTED
     return None
