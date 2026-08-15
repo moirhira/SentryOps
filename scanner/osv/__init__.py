@@ -7,6 +7,7 @@ from .client import (
     is_actionable,
     filter_actionable_vulns,
 )
+from .version import EvaluationResult
 
 
 
