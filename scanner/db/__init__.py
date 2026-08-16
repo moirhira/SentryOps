@@ -3,7 +3,7 @@ scanner.db — SQLite persistence package for SentryOps.
 """
 
 from scanner.db.schema import get_connection, init_db, generate_scan_id
-from scanner.db.store import save_scan, list_scans, get_scan, get_findings_for_package
+from scanner.db.store import save_scan, list_scans, get_scan, get_findings_for_package, compare_scans
 
 __all__ = [
     "get_connection",
@@ -13,4 +13,5 @@ __all__ = [
     "list_scans",
     "get_scan",
     "get_findings_for_package",
+    "compare_scans",
 ]
