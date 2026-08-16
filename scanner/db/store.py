@@ -285,13 +285,25 @@ def compare_scans(
         if not new_meta:
             raise ValueError(f"Scan not found: {new_scan_id}")
 
-        # Fetch findings as (package_name, vulnerability_id, severity) tuples
+        # Fetch findings as (package_name, ecosystem, vulnerability_id) tuples
         def _get_findings_set(sid: str) -> dict[tuple, dict]:
-            """Return {(pkg_name, vuln_id): finding_row} for a scan."""
+            """
+            Return {(package_name, ecosystem, vulnerability_id): finding_row} for a scan.
+
+            Identity is (package_name, ecosystem, vulnerability_id) so that:
+              - The same CVE on the same package in the same ecosystem is always
+                the same finding, regardless of which scan it belongs to.
+              - Package rows from different scans never share IDs, so we must
+                never use the SQLite package_id as a cross-scan key.
+            """
             rows = conn.execute(
                 """
-                SELECT f.vulnerability_id, f.severity, f.fixed_version,
-                       p.name AS package_name, p.version AS installed_version
+                SELECT f.vulnerability_id,
+                       f.severity,
+                       f.fixed_version,
+                       f.ecosystem,
+                       p.name    AS package_name,
+                       p.version AS installed_version
                 FROM findings f
                 JOIN packages p ON p.id = f.package_id
                 WHERE f.scan_id = ?
@@ -300,7 +312,11 @@ def compare_scans(
             ).fetchall()
             result = {}
             for r in rows:
-                key = (r["package_name"], r["vulnerability_id"])
+                key = (
+                    r["package_name"],
+                    r["ecosystem"],
+                    r["vulnerability_id"],
+                )
                 result[key] = dict(r)
             return result
 
@@ -337,11 +353,13 @@ def compare_scans(
 
         # Build detail lists for new and resolved
         def _detail(key: tuple, findings: dict) -> dict:
+            pkg_name, ecosystem, vuln_id = key
             f = findings[key]
             return {
-                "package": f["package_name"],
+                "package": pkg_name,
+                "ecosystem": ecosystem,
                 "installed_version": f["installed_version"],
-                "vulnerability_id": f["vulnerability_id"],
+                "vulnerability_id": vuln_id,
                 "severity": f.get("severity"),
                 "fixed_version": f.get("fixed_version"),
             }
