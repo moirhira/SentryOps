@@ -5,6 +5,7 @@ from pathlib import Path
 
 from scanner.application import scan_application
 from scanner.container import scan_container
+from scanner.db import generate_scan_id, save_scan, list_scans
 from scanner.formatter import (
     build_scan_summary,
     render_human_readable,
@@ -95,7 +96,7 @@ def run_scan(
     scan_types = list(scanned_counts.keys())
 
     scan_meta = {
-        "id": f"scan-{datetime.now().strftime('%Y%m%d')}-001",
+        "id": generate_scan_id(),
         "started_at": started_at_iso,
         "duration": duration,
         "is_cached": duration < 1.0,
@@ -106,6 +107,17 @@ def run_scan(
     }
 
     summary = build_scan_summary(scanned_counts, findings_by_category)
+
+    # Persist to SQLite
+    try:
+        saved_id = save_scan(
+            scan_meta=scan_meta,
+            host_info=host_info,
+            pkg_manager=pkg_manager,
+            findings_by_category=findings_by_category,
+        )
+    except Exception as e:
+        print(f"[warning] Could not save scan to database: {e}")
 
     # Determine requested format
     out_lower = output_option.lower()
@@ -133,6 +145,24 @@ def run_scan(
         print(render_human_readable(scan_meta, summary, host_info, pkg_manager))
 
 
+def run_history(limit: int = 10) -> None:
+    """Print a table of recent scans from the SQLite database."""
+    scans = list_scans(limit=limit)
+    if not scans:
+        print("No scan history found. Run 'sentryops scan host' to start.")
+        return
+
+    print(f"\n{'ID':<30} {'Started':<22} {'Target':<18} {'OS':<24} {'Duration':>8}  Findings (C/H/M/L)")
+    print("-" * 118)
+    for s in scans:
+        findings_str = f"{s['critical'] or 0}C / {s['high'] or 0}H / {s['medium'] or 0}M / {s['low'] or 0}L"
+        os_str = (s.get("os") or "N/A")[:22]
+        duration_str = f"{s['duration']:.1f}s" if s.get("duration") is not None else "N/A"
+        started = (s["started_at"] or "")[:19].replace("T", " ")
+        print(f"{s['id']:<30} {started:<22} {s['target']:<18} {os_str:<24} {duration_str:>8}  {findings_str}")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="sentryops",
@@ -140,6 +170,7 @@ def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="command", help="Subcommand to execute")
 
+    # ── scan subcommand ──────────────────────────────────────────────────────
     scan_parser = subparsers.add_parser("scan", help="Run vulnerability scan")
     scan_parser.add_argument(
         "target",
@@ -164,6 +195,16 @@ def main() -> None:
         help="Explicit output format: 'text' or 'json'",
     )
 
+    # ── history subcommand ───────────────────────────────────────────────────
+    history_parser = subparsers.add_parser("history", help="Show recent scan history")
+    history_parser.add_argument(
+        "--limit",
+        "-n",
+        type=int,
+        default=10,
+        help="Number of recent scans to show (default: 10)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "scan" or args.command is None:
@@ -171,6 +212,8 @@ def main() -> None:
         output = getattr(args, "output", "text")
         fmt = getattr(args, "format", None)
         run_scan(target, output_option=output, format_option=fmt)
+    elif args.command == "history":
+        run_history(limit=args.limit)
     else:
         parser.print_help()
 
