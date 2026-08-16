@@ -252,3 +252,116 @@ def get_findings_for_package(
             (package_name,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+def compare_scans(
+    old_scan_id: str,
+    new_scan_id: str,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict:
+    """
+    Compare two scans and return a structured diff.
+
+    Returns a dict with:
+        old_scan        — scan metadata for the baseline
+        new_scan        — scan metadata for the current
+        severity_delta  — {CRITICAL, HIGH, MEDIUM, LOW} with old/new/delta values
+        new_vulns       — list of findings present in new scan but not in old
+        resolved_vulns  — list of findings present in old scan but not in new
+        persisted_count — number of vulnerabilities in both scans
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        # Fetch metadata for both scans
+        def _get_scan_meta(sid: str) -> dict | None:
+            row = conn.execute("SELECT * FROM scans WHERE id = ?", (sid,)).fetchone()
+            return dict(row) if row else None
+
+        old_meta = _get_scan_meta(old_scan_id)
+        new_meta = _get_scan_meta(new_scan_id)
+
+        if not old_meta:
+            raise ValueError(f"Scan not found: {old_scan_id}")
+        if not new_meta:
+            raise ValueError(f"Scan not found: {new_scan_id}")
+
+        # Fetch findings as (package_name, vulnerability_id, severity) tuples
+        def _get_findings_set(sid: str) -> dict[tuple, dict]:
+            """Return {(pkg_name, vuln_id): finding_row} for a scan."""
+            rows = conn.execute(
+                """
+                SELECT f.vulnerability_id, f.severity, f.fixed_version,
+                       p.name AS package_name, p.version AS installed_version
+                FROM findings f
+                JOIN packages p ON p.id = f.package_id
+                WHERE f.scan_id = ?
+                """,
+                (sid,),
+            ).fetchall()
+            result = {}
+            for r in rows:
+                key = (r["package_name"], r["vulnerability_id"])
+                result[key] = dict(r)
+            return result
+
+        old_findings = _get_findings_set(old_scan_id)
+        new_findings = _get_findings_set(new_scan_id)
+
+        old_keys = set(old_findings.keys())
+        new_keys = set(new_findings.keys())
+
+        new_vuln_keys = new_keys - old_keys       # appeared in new scan
+        resolved_keys = old_keys - new_keys       # gone from new scan
+        persisted_keys = old_keys & new_keys      # in both
+
+        # Severity counts per scan
+        def _severity_counts(findings: dict) -> dict[str, int]:
+            counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+            for f in findings.values():
+                sev = f.get("severity") or "LOW"
+                if sev in counts:
+                    counts[sev] += 1
+            return counts
+
+        old_sev = _severity_counts(old_findings)
+        new_sev = _severity_counts(new_findings)
+
+        severity_delta = {
+            sev: {
+                "old": old_sev[sev],
+                "new": new_sev[sev],
+                "delta": new_sev[sev] - old_sev[sev],
+            }
+            for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+        }
+
+        # Build detail lists for new and resolved
+        def _detail(key: tuple, findings: dict) -> dict:
+            f = findings[key]
+            return {
+                "package": f["package_name"],
+                "installed_version": f["installed_version"],
+                "vulnerability_id": f["vulnerability_id"],
+                "severity": f.get("severity"),
+                "fixed_version": f.get("fixed_version"),
+            }
+
+        sev_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, None: 4}
+
+        new_vulns = sorted(
+            [_detail(k, new_findings) for k in new_vuln_keys],
+            key=lambda x: (sev_order.get(x["severity"], 4), x["package"]),
+        )
+        resolved_vulns = sorted(
+            [_detail(k, old_findings) for k in resolved_keys],
+            key=lambda x: (sev_order.get(x["severity"], 4), x["package"]),
+        )
+
+        return {
+            "old_scan": old_meta,
+            "new_scan": new_meta,
+            "severity_delta": severity_delta,
+            "new_vulns": new_vulns,
+            "resolved_vulns": resolved_vulns,
+            "persisted_count": len(persisted_keys),
+        }
