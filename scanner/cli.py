@@ -1,6 +1,7 @@
 import argparse
-import json
 import time
+import glob
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -413,6 +414,77 @@ def run_history_compare(old_id: str, new_id: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# FLEET — ingest
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_fleet_ingest(pattern: str) -> None:
+    """
+    Ingest multiple per-host JSON scan reports (produced remotely by
+    `sentryops scan host -o json`) into the local SQLite database.
+    Each file's target is set from its filename (web-server-01.json -> "web-server-01").
+    """
+    files = sorted(glob.glob(pattern))
+    if not files:
+        print(f"No files matched pattern: {pattern}")
+        return
+
+    ingested = []
+    for filepath in files:
+        with open(filepath) as f:
+            report = json.load(f)
+
+        # Derive hostname from filename, e.g. "web-server-01.json" -> "web-server-01"
+        hostname = Path(filepath).stem
+
+        scan_meta = report.get("scan", {})
+        if not scan_meta and "timestamp" in report:
+            scan_meta = {
+                "id": generate_scan_id(),
+                "started_at": report.get("timestamp"),
+                "duration": 0.0,
+                "target_type": "Linux Host",
+                "scan_types": ["host"],
+            }
+        elif not scan_meta:
+            scan_meta = {
+                "id": generate_scan_id(),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "duration": 0.0,
+                "target_type": "Linux Host",
+                "scan_types": ["host"],
+            }
+
+        scan_meta["target"] = hostname  # overwrite "localhost" with real hostname
+        scan_meta["target_name"] = hostname
+
+        # Reconstruct findings_by_category shape save_scan() expects
+        findings_by_category = {"host": {}}
+        raw_findings = report.get("findings", [])
+
+        if isinstance(raw_findings, list):
+            for finding in raw_findings:
+                pkg_name = finding.get("package", "unknown")
+                pkg_ver = finding.get("installed", "unknown")
+                key = f"{pkg_name}=={pkg_ver}"
+                findings_by_category["host"].setdefault(key, []).append(finding)
+        elif isinstance(raw_findings, dict):
+            for category, cat_findings in raw_findings.items():
+                if isinstance(cat_findings, dict):
+                    findings_by_category[category] = cat_findings
+
+        scan_id = save_scan(
+            scan_meta=scan_meta,
+            host_info=None,
+            pkg_manager="dpkg",
+            findings_by_category=findings_by_category,
+        )
+        ingested.append((hostname, scan_id))
+        print(f"  Ingested {hostname}: {scan_id}")
+
+    print(f"\nFleet ingest complete: {len(ingested)} hosts")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ARGUMENT PARSER
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -469,6 +541,12 @@ def main() -> None:
     compare_p.add_argument("old_scan_id", help="Baseline (older) scan ID")
     compare_p.add_argument("new_scan_id", help="Current (newer) scan ID")
 
+    # ── fleet ─────────────────────────────────────────────────────────────────
+    fleet_parser = subparsers.add_parser("fleet", help="Fleet management operations")
+    fleet_sub = fleet_parser.add_subparsers(dest="fleet_command")
+    ingest_parser = fleet_sub.add_parser("ingest", help="Ingest per-host JSON scan reports into local database")
+    ingest_parser.add_argument("pattern", help="Glob pattern, e.g. './fleet_results/*.json'")
+
     args = parser.parse_args()
 
     # ── dispatch ──────────────────────────────────────────────────────────────
@@ -488,6 +566,13 @@ def main() -> None:
             run_history_compare(args.old_scan_id, args.new_scan_id)
         else:
             run_history(limit=args.limit)
+
+    elif args.command == "fleet":
+        fcmd = getattr(args, "fleet_command", None)
+        if fcmd == "ingest":
+            run_fleet_ingest(args.pattern)
+        else:
+            fleet_parser.print_help()
 
     else:
         parser.print_help()
